@@ -247,9 +247,12 @@ def train_epoch(
 
         if (step + 1) % grad_accum == 0:
             if scaler:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
             else:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
             scheduler.step()
             optimizer.zero_grad()

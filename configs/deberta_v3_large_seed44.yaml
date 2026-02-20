@@ -5,9 +5,9 @@ model_name: microsoft/deberta-v3-large
 task: evasion
 max_length: 384
 precision: bf16
-batch_size: 8
-grad_accum: 2
-lr: 1.0e-5
+batch_size: 16
+grad_accum: 1
+lr: 2.0e-5
 weight_decay: 0.01
 warmup_ratio: 0.06
 epochs: 5
@@ -16,7 +16,7 @@ dropout: 0.1
 seed: 44
 output_dir: checkpoints/deberta_v3_large_seed44
 use_focal_loss: false
-use_class_weights: true
+use_class_weights: false
 label_smoothing: 0.05
 alpha: 0.7
 consistency_beta: 0.1

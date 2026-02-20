@@ -114,7 +114,9 @@ def load_model_from_checkpoint(
         attn_implementation=attn_impl,
     )
 
-    model.load_state_dict(ckpt["model_state_dict"])
+    # strict=False: checkpoints with class_weights save loss_fn.weight
+    # which won't exist in a fresh model. Safe to ignore.
+    model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.to(device)
     if device.type != "cuda":
         model = model.float()
