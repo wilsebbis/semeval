@@ -23,6 +23,20 @@ from clarity.labels import (
 
 logger = logging.getLogger("clarity")
 
+# DeBERTa model types that don't support SDPA in transformers
+_DEBERTA_MODEL_TYPES = {"deberta-v2", "deberta"}
+
+
+def _resolve_attn_impl(config: AutoConfig, requested: str) -> str:
+    """Override attention implementation for models that don't support SDPA."""
+    model_type = getattr(config, "model_type", "")
+    if model_type in _DEBERTA_MODEL_TYPES and requested != "eager":
+        logger.info(
+            f"Attention override: eager (DeBERTaV2 does not support '{requested}')"
+        )
+        return "eager"
+    return requested
+
 
 # ─── Focal Loss ───────────────────────────────────────────────────────────────
 
@@ -86,8 +100,10 @@ class HierarchicalClassifier(nn.Module):
     ):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name)
+        # DeBERTaV2 doesn't support SDPA — force eager
+        actual_attn = _resolve_attn_impl(self.config, attn_implementation)
         self.encoder = AutoModel.from_pretrained(
-            model_name, attn_implementation=attn_implementation
+            model_name, attn_implementation=actual_attn
         )
         hidden_size = self.config.hidden_size
 
@@ -174,8 +190,9 @@ class MultitaskClassifier(nn.Module):
         self.consistency_beta = consistency_beta
 
         self.config = AutoConfig.from_pretrained(model_name)
+        actual_attn = _resolve_attn_impl(self.config, attn_implementation)
         self.encoder = AutoModel.from_pretrained(
-            model_name, attn_implementation=attn_implementation
+            model_name, attn_implementation=actual_attn
         )
         hidden_size = self.config.hidden_size
 

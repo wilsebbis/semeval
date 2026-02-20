@@ -413,14 +413,17 @@ def main():
     elif device.type == "mps":
         _setup_mps_guards()
 
-    # Attention implementation: SDPA on CUDA, eager on MPS/CPU
+    # Attention: request SDPA on CUDA (models.py will override to eager for DeBERTa)
     if device.type == "cuda":
         attn_impl = "sdpa"
     else:
         attn_impl = "eager"
 
     eff_batch = args.batch_size * args.grad_accum
-    logger.info(f"Precision: {precision} | Attention: {attn_impl} | Effective batch: {eff_batch}")
+    logger.info(
+        f"Precision: {precision} | Attention: {attn_impl} "
+        f"(DeBERTa auto-overrides to eager) | Effective batch: {eff_batch}"
+    )
 
     # Tokenizer
     # DeBERTa-v3 needs use_fast=False to avoid spm.model conversion errors
