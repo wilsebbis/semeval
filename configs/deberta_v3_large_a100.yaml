@@ -1,6 +1,6 @@
 # CLARITY Training Config: DeBERTa-v3-large — A100 dedicated
 # Identical to deberta_v3_large.yaml but named for clarity in docs
-# Use this on Colab A100. Expected: Task2 strict F1 ~0.56-0.65
+# Use this on Colab A100. Observed: base ≈ 0.27–0.28 strict Task2 F1; large TBD
 
 model_name: microsoft/deberta-v3-large
 task: evasion
@@ -17,7 +17,7 @@ dropout: 0.1
 seed: 42
 output_dir: checkpoints/deberta_v3_large_a100
 use_focal_loss: false
-use_class_weights: false  # toggle true if minority classes collapse
+use_class_weights: true   # critical for macro F1 with imbalanced labels
 label_smoothing: 0.05
 alpha: 0.7
 consistency_beta: 0.1

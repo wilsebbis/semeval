@@ -16,7 +16,7 @@ dropout: 0.1
 seed: 43
 output_dir: checkpoints/deberta_v3_large_seed43
 use_focal_loss: false
-use_class_weights: false
+use_class_weights: true
 label_smoothing: 0.05
 alpha: 0.7
 consistency_beta: 0.1
