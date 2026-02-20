@@ -510,25 +510,19 @@ def main():
     )
     model.to(device)
 
-    # Dtype normalization: ensure consistent param dtypes.
-    # HF DeBERTa safetensors ships some params as fp16 even when model is "fp32".
-    # We normalize to the target precision so autocast and classifier dtypes align.
-    if device.type == "cuda" and precision == "bf16":
-        model.bfloat16()
-        target_dtype = torch.bfloat16
-    elif device.type == "cuda" and precision == "fp16":
-        model.half()
-        target_dtype = torch.float16
-    else:
-        # CPU, MPS, or fp32 on CUDA — always fp32
-        model.float()
-        target_dtype = torch.float32
+    # Dtype normalization: ALWAYS keep weights in fp32.
+    # Standard mixed precision = fp32 master weights + autocast for bf16/fp16 forward.
+    # HF DeBERTa safetensors ships some params as fp16; normalize them.
+    # autocast in train_epoch / evaluate_epoch handles the fast bf16/fp16 matmuls.
+    model.float()
     param_dtypes = {p.dtype for p in model.parameters()}
-    logger.info(f"Model param dtypes (precision={precision}): {param_dtypes}")
-    if param_dtypes != {target_dtype}:
-        logger.warning(f"Mixed dtypes detected: {param_dtypes}. Forcing all to {target_dtype}.")
+    logger.info(
+        f"Model param dtypes (CUDA, precision={precision}, params kept fp32): {param_dtypes}"
+    )
+    if param_dtypes != {torch.float32}:
+        logger.warning(f"Mixed dtypes detected: {param_dtypes}. Forcing all to float32.")
         for p in model.parameters():
-            p.data = p.data.to(target_dtype)
+            p.data = p.data.float()
 
     param_info = count_parameters(model)
     logger.info(f"Parameters: {param_info}")
