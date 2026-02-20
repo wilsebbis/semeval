@@ -334,10 +334,15 @@ def build_model(
             label_smoothing=label_smoothing,
             attn_implementation=attn_implementation,
         )
+        # Read the effective attention from the encoder config (reflects DeBERTa override)
+        effective_attn = getattr(
+            model.encoder.config, "_attn_implementation_internal",
+            getattr(model.encoder.config, "attn_implementation", attn_implementation),
+        )
         logger.info(
             f"Built HierarchicalClassifier with {model_name} "
             f"({'focal' if use_focal_loss else 'CE'} loss, "
-            f"label_smoothing={label_smoothing}, attn={actual_attn})"
+            f"label_smoothing={label_smoothing}, attn={effective_attn})"
         )
     elif task == "multitask":
         model = MultitaskClassifier(
@@ -351,9 +356,13 @@ def build_model(
             clarity_class_weights=clarity_class_weights,
             attn_implementation=attn_implementation,
         )
+        effective_attn = getattr(
+            model.encoder.config, "_attn_implementation_internal",
+            getattr(model.encoder.config, "attn_implementation", attn_implementation),
+        )
         logger.info(
             f"Built MultitaskClassifier with {model_name} "
-            f"(alpha={alpha}, beta={consistency_beta}, attn={attn_implementation})"
+            f"(alpha={alpha}, beta={consistency_beta}, attn={effective_attn})"
         )
     else:
         raise ValueError(f"Unknown task: {task}. Expected: evasion, clarity, multitask")
