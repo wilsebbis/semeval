@@ -1,0 +1,21 @@
+# CLARITY SemEval 2026 — Requirements
+# Install: uv pip install -r requirements.txt
+# Or:      pip install -r requirements.txt
+
+torch>=2.0
+transformers>=4.36
+datasets>=2.14
+scikit-learn>=1.3
+pandas>=2.0
+pyarrow>=14.0
+pyyaml>=6.0
+tqdm>=4.65
+accelerate>=0.25
+sentencepiece>=0.1.99
+tiktoken>=0.5
+protobuf>=3.20
+
+# Dev / testing (optional)
+# pytest>=7.0
+# matplotlib>=3.7
+# seaborn>=0.12

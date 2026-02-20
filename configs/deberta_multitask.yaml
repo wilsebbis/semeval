@@ -1,0 +1,23 @@
+# CLARITY Training Config: Multitask with DeBERTa-v3-base
+# Trains both evasion (9-way) and clarity (3-way) heads jointly.
+# Expected: slightly better Task1 due to direct clarity supervision.
+
+model_name: microsoft/deberta-v3-base
+task: multitask
+max_length: 384
+batch_size: 8
+grad_accum: 2
+lr: 1.5e-5
+weight_decay: 0.01
+warmup_ratio: 0.06
+epochs: 5
+patience: 3
+dropout: 0.1
+seed: 42
+output_dir: checkpoints/deberta_multitask
+use_focal_loss: false
+use_class_weights: true
+label_smoothing: 0.05
+alpha: 0.7
+consistency_beta: 0.1
+fp16: false

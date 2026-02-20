@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+
+# Data (large files — download via prepare_data.sh)
+data/
+QEvasion/
+
+# Model checkpoints (large files)
+checkpoints/
+
+# Submissions
+submissions/
+
+# HF cache
+.cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# UV
+uv.lock
+
+# Logs
+*.log

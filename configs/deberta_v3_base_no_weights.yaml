@@ -1,0 +1,23 @@
+# CLARITY Training Config: DeBERTa-v3-base (no class weights ablation)
+# Tests if removing heavy class weights improves macro F1 stability.
+# Compare against deberta_v3_base.yaml (with weights).
+
+model_name: microsoft/deberta-v3-base
+task: evasion
+max_length: 384
+batch_size: 8
+grad_accum: 2
+lr: 2.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.06
+epochs: 4
+patience: 3
+dropout: 0.1
+seed: 42
+output_dir: checkpoints/deberta_v3_base_no_weights
+use_focal_loss: false
+use_class_weights: false
+label_smoothing: 0.05
+alpha: 0.7
+consistency_beta: 0.1
+fp16: false

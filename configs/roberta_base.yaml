@@ -1,0 +1,22 @@
+# CLARITY Training Config: RoBERTa-base
+# Fast baseline. Expected performance: Task1 ~0.76-0.80, Task2 ~0.45-0.52
+
+model_name: roberta-base
+task: evasion
+max_length: 256
+batch_size: 16
+grad_accum: 1
+lr: 2.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.06
+epochs: 5
+patience: 3
+dropout: 0.1
+seed: 42
+output_dir: checkpoints/roberta_base
+use_focal_loss: false
+use_class_weights: true
+label_smoothing: 0.05
+alpha: 0.7
+consistency_beta: 0.1
+fp16: false
