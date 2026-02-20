@@ -269,6 +269,7 @@ def evaluate_epoch(
     device: torch.device,
     task: str = "evasion",
     annotator_labels: Optional[List[List[str]]] = None,
+    precision: str = "fp32",
 ) -> Dict[str, Any]:
     """Evaluate on validation set, return metrics.
     
@@ -296,10 +297,18 @@ def evaluate_epoch(
         if "clarity_label" in batch:
             kwargs["clarity_label"] = batch["clarity_label"].to(device)
 
-        outputs = model(**kwargs)
+        # Autocast for eval too — prevents dtype mismatch
+        autocast_dtype = _get_autocast_dtype(precision)
+        use_amp = autocast_dtype is not None and device.type == "cuda"
+
+        if use_amp:
+            with torch.amp.autocast("cuda", dtype=autocast_dtype):
+                outputs = model(**kwargs)
+        else:
+            outputs = model(**kwargs)
 
         if "loss" in outputs:
-            total_loss += outputs["loss"].item()
+            total_loss += outputs["loss"].float().item()  # fp32 for stability
         num_batches += 1
 
         # Get logits
@@ -501,19 +510,17 @@ def main():
     )
     model.to(device)
 
-    # Float32 hardening — only needed on MPS/CPU to fix DeBERTa safetensor fp16 loads
-    # On CUDA with mixed precision, we want the model in fp32 and autocast handles the rest
-    if device.type != "cuda" or precision == "fp32":
-        model.float()
-        param_dtypes = {p.dtype for p in model.parameters()}
-        logger.info(f"Model param dtypes after .float(): {param_dtypes}")
-        if param_dtypes != {torch.float32}:
-            logger.warning(f"Mixed dtypes detected: {param_dtypes}. Forcing all to float32.")
-            for p in model.parameters():
-                p.data = p.data.float()
-    else:
-        param_dtypes = {p.dtype for p in model.parameters()}
-        logger.info(f"Model param dtypes (CUDA, precision={precision}): {param_dtypes}")
+    # Float32 hardening — ALWAYS normalize params to fp32.
+    # HF DeBERTa safetensors ships some params as fp16.
+    # On CUDA with mixed precision, autocast handles the fast bf16/fp16 matmuls;
+    # base params must be fp32 for autocast to work correctly.
+    model.float()
+    param_dtypes = {p.dtype for p in model.parameters()}
+    logger.info(f"Model param dtypes after .float(): {param_dtypes}")
+    if param_dtypes != {torch.float32}:
+        logger.warning(f"Mixed dtypes detected: {param_dtypes}. Forcing all to float32.")
+        for p in model.parameters():
+            p.data = p.data.float()
 
     param_info = count_parameters(model)
     logger.info(f"Parameters: {param_info}")
@@ -591,6 +598,7 @@ def main():
                 model, dev_loader, device,
                 task=args.task,
                 annotator_labels=annot_labels,
+                precision=precision,
             )
             epoch_metrics.update(val_metrics)
 

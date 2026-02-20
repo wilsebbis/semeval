@@ -128,6 +128,8 @@ class HierarchicalClassifier(nn.Module):
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         cls_output = outputs.last_hidden_state[:, 0, :]  # [CLS]
         cls_output = self.dropout(cls_output)
+        # Defensive: align dtype with classifier weights (prevents Half/Float mismatch)
+        cls_output = cls_output.to(self.classifier.weight.dtype)
         logits = self.classifier(cls_output)
 
         result: Dict[str, torch.Tensor] = {"logits": logits}
@@ -136,7 +138,8 @@ class HierarchicalClassifier(nn.Module):
             # Filter out invalid labels (-1)
             valid_mask = evasion_label >= 0
             if valid_mask.any():
-                loss = self.loss_fn(logits[valid_mask], evasion_label[valid_mask])
+                # Compute loss in fp32 for numerical stability
+                loss = self.loss_fn(logits[valid_mask].float(), evasion_label[valid_mask])
             else:
                 loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
             result["loss"] = loss
@@ -236,6 +239,8 @@ class MultitaskClassifier(nn.Module):
         cls_output = outputs.last_hidden_state[:, 0, :]
         cls_output = self.dropout(cls_output)
 
+        # Defensive: align dtype with head weights
+        cls_output = cls_output.to(self.evasion_head.weight.dtype)
         ev_logits = self.evasion_head(cls_output)
         cl_logits = self.clarity_head(cls_output)
 
@@ -252,7 +257,7 @@ class MultitaskClassifier(nn.Module):
                 valid_ev = evasion_label >= 0
                 if valid_ev.any():
                     ev_loss = self.evasion_loss_fn(
-                        ev_logits[valid_ev], evasion_label[valid_ev]
+                        ev_logits[valid_ev].float(), evasion_label[valid_ev]
                     )
                     loss = loss + self.alpha * ev_loss
                     result["evasion_loss"] = ev_loss
@@ -261,14 +266,14 @@ class MultitaskClassifier(nn.Module):
                 valid_cl = clarity_label >= 0
                 if valid_cl.any():
                     cl_loss = self.clarity_loss_fn(
-                        cl_logits[valid_cl], clarity_label[valid_cl]
+                        cl_logits[valid_cl].float(), clarity_label[valid_cl]
                     )
                     loss = loss + (1 - self.alpha) * cl_loss
                     result["clarity_loss"] = cl_loss
 
             # Consistency regularizer
             if self.consistency_beta > 0:
-                ev_probs = F.softmax(ev_logits, dim=-1)
+                ev_probs = F.softmax(ev_logits.float(), dim=-1)
                 # Map evasion probs to clarity space
                 mapped_cl_probs = torch.matmul(
                     self.mapping_matrix, ev_probs.t()
@@ -332,7 +337,7 @@ def build_model(
         logger.info(
             f"Built HierarchicalClassifier with {model_name} "
             f"({'focal' if use_focal_loss else 'CE'} loss, "
-            f"label_smoothing={label_smoothing}, attn={attn_implementation})"
+            f"label_smoothing={label_smoothing}, attn={actual_attn})"
         )
     elif task == "multitask":
         model = MultitaskClassifier(
