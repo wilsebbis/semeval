@@ -1,45 +1,17 @@
-#!/usr/bin/env bash
-# Ensemble: train 3 seeds, average logits at prediction time
+#!/bin/bash
+# Ensemble: average logits from 3 seeds → final prediction
 set -euo pipefail
+export HF_HOME=${HF_HOME:-/content/hf_cache}
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+DATA=${1:-data/dev.csv}
+OUT=${2:-submissions/ensemble_predictions.csv}
 
-cd "$PROJECT_DIR"
-
-# HF cache: avoid macOS sandbox permission errors on ~/.cache
-export HF_HOME="${HF_HOME:-/tmp/hf_cache}"
-export TRANSFORMERS_CACHE="$HF_HOME"
-export PYTORCH_ENABLE_MPS_FALLBACK=1
-
-CONFIG="${1:-configs/deberta_v3_large.yaml}"
-SEEDS=(42 123 2026)
-
-# Train with different seeds
-for SEED in "${SEEDS[@]}"; do
-    echo "=== Training seed $SEED ==="
-    python -m clarity.train \
-        --config "$CONFIG" \
-        --data data/train.csv \
-        --dev data/dev.csv \
-        --task evasion \
-        --seed "$SEED" \
-        --output_dir "checkpoints/ensemble_seed${SEED}"
-done
-
-# Ensemble prediction
-echo "=== Ensemble prediction ==="
-CKPTS=""
-for SEED in "${SEEDS[@]}"; do
-    CKPTS="$CKPTS checkpoints/ensemble_seed${SEED}/best_model.pt"
-done
-
-python -m clarity.predict \
-    --ckpt checkpoints/ensemble_seed42/best_model.pt \
-    --ensemble_ckpts $CKPTS \
-    --data data/test.csv \
-    --out submissions/ensemble_sub.csv \
-    --evaluate \
-    --metrics_out submissions/ensemble_metrics.json
-
-echo "Ensemble submission written to: submissions/ensemble_sub.csv"
+python -m clarity.ensemble \
+    --ckpts \
+        checkpoints/deberta_v3_large/best_model.pt \
+        checkpoints/deberta_v3_large_seed43/best_model.pt \
+        checkpoints/deberta_v3_large_seed44/best_model.pt \
+    --data "$DATA" \
+    --out "$OUT" \
+    --task evasion \
+    --evaluate

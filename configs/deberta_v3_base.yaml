@@ -1,12 +1,13 @@
 # CLARITY Training Config: DeBERTa-v3-base
-# Local Mac/MPS workhorse. Expected: Task1 ~0.78-0.83, Task2 ~0.48-0.56
-# MPS-safe: fp16 off, eager attention forced in code
+# Mac/MPS + T4 workhorse. Expected: Task2 ~0.48-0.56
+# MPS-safe: precision auto → fp32, eager attention forced in code
 
 model_name: microsoft/deberta-v3-base
 task: evasion
 max_length: 384
-batch_size: 8
-grad_accum: 2
+precision: auto           # bf16 on CUDA, fp32 on MPS/CPU
+batch_size: 16
+grad_accum: 1             # effective batch = 16
 lr: 2.0e-5
 weight_decay: 0.01
 warmup_ratio: 0.06
@@ -16,7 +17,7 @@ dropout: 0.1
 seed: 42
 output_dir: checkpoints/deberta_v3_base
 use_focal_loss: false
-use_class_weights: true
+use_class_weights: false
 label_smoothing: 0.05
 alpha: 0.7
 consistency_beta: 0.1

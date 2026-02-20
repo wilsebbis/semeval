@@ -6,7 +6,7 @@ Supports loading from:
   - Parquet files
   - HuggingFace datasets hub (ailsntua/QEvasion)
 
-Constructs input as:  "Q: {question} [SEP] A: {answer}"
+Constructs input as:  "Question: {question}\nAnswer: {answer}"
 """
 
 import logging
@@ -114,7 +114,7 @@ class ClarityDataset(Dataset):
     """
     PyTorch Dataset for CLARITY classification.
 
-    Input format: "Q: {question} [SEP] A: {answer}"
+    Input format: "Question: {question}\nAnswer: {answer}"
 
     Supports three modes:
       - "evasion" (Task 2): 9-way classification
@@ -135,10 +135,13 @@ class ClarityDataset(Dataset):
         self.task = task
         self.is_test = is_test
 
-        # Detect columns
+        # Detect columns — prefers interview_question over question
         q_col, a_col = _detect_columns(df)
+        self.q_col = q_col  # Track which column was selected
+        self.a_col = a_col
         self.questions = df[q_col].fillna("").astype(str).tolist()
         self.answers = df[a_col].fillna("").astype(str).tolist()
+        logger.info(f"Text columns: question='{q_col}', answer='{a_col}'")
 
         # IDs for submission
         if "index" in df.columns:
@@ -213,8 +216,8 @@ class ClarityDataset(Dataset):
         q = self.questions[idx]
         a = self.answers[idx]
 
-        # Format: "Q: {question} [SEP] A: {answer}"
-        text = f"Q: {q} {self.tokenizer.sep_token} A: {a}"
+        # Format: "Question: {question}\nAnswer: {answer}"
+        text = f"Question: {q}\nAnswer: {a}"
 
         encoding = self.tokenizer(
             text,

@@ -82,12 +82,12 @@ class HierarchicalClassifier(nn.Module):
         focal_gamma: float = 2.0,
         class_weights: Optional[torch.Tensor] = None,
         label_smoothing: float = 0.0,
+        attn_implementation: str = "eager",
     ):
         super().__init__()
         self.config = AutoConfig.from_pretrained(model_name)
-        # Force eager attention to avoid SDPA/flash paths that crash on MPS
         self.encoder = AutoModel.from_pretrained(
-            model_name, attn_implementation="eager"
+            model_name, attn_implementation=attn_implementation
         )
         hidden_size = self.config.hidden_size
 
@@ -167,6 +167,7 @@ class MultitaskClassifier(nn.Module):
         focal_gamma: float = 2.0,
         evasion_class_weights: Optional[torch.Tensor] = None,
         clarity_class_weights: Optional[torch.Tensor] = None,
+        attn_implementation: str = "eager",
     ):
         super().__init__()
         self.alpha = alpha
@@ -174,7 +175,7 @@ class MultitaskClassifier(nn.Module):
 
         self.config = AutoConfig.from_pretrained(model_name)
         self.encoder = AutoModel.from_pretrained(
-            model_name, attn_implementation="eager"
+            model_name, attn_implementation=attn_implementation
         )
         hidden_size = self.config.hidden_size
 
@@ -297,6 +298,7 @@ def build_model(
     evasion_class_weights: Optional[torch.Tensor] = None,
     clarity_class_weights: Optional[torch.Tensor] = None,
     label_smoothing: float = 0.0,
+    attn_implementation: str = "eager",
 ) -> nn.Module:
     """Factory: build model based on task type."""
     if task in ("evasion", "clarity"):
@@ -308,11 +310,12 @@ def build_model(
             focal_gamma=focal_gamma,
             class_weights=weights,
             label_smoothing=label_smoothing,
+            attn_implementation=attn_implementation,
         )
         logger.info(
             f"Built HierarchicalClassifier with {model_name} "
             f"({'focal' if use_focal_loss else 'CE'} loss, "
-            f"label_smoothing={label_smoothing})"
+            f"label_smoothing={label_smoothing}, attn={attn_implementation})"
         )
     elif task == "multitask":
         model = MultitaskClassifier(
@@ -324,10 +327,11 @@ def build_model(
             focal_gamma=focal_gamma,
             evasion_class_weights=evasion_class_weights,
             clarity_class_weights=clarity_class_weights,
+            attn_implementation=attn_implementation,
         )
         logger.info(
             f"Built MultitaskClassifier with {model_name} "
-            f"(alpha={alpha}, beta={consistency_beta})"
+            f"(alpha={alpha}, beta={consistency_beta}, attn={attn_implementation})"
         )
     else:
         raise ValueError(f"Unknown task: {task}. Expected: evasion, clarity, multitask")

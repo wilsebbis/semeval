@@ -1,12 +1,13 @@
-# CLARITY Training Config: DeBERTa-v3-large
-# Top-tier config. Expected performance: Task1 ~0.83-0.89, Task2 ~0.56-0.65
-# Requires ~16GB VRAM; use grad_accum=4 with batch_size=4 on smaller GPUs.
+# CLARITY Training Config: DeBERTa-v3-large (A100 optimized)
+# Tuned for A100 80GB. Expected: Task2 strict F1 ~0.56-0.65
+# Memory: ~12-14GB with bf16, batch_size=8, max_length=384
 
 model_name: microsoft/deberta-v3-large
 task: evasion
 max_length: 384
-batch_size: 4
-grad_accum: 4
+precision: bf16           # auto-selects bf16 on A100 (use fp16 for T4/V100)
+batch_size: 8
+grad_accum: 2             # effective batch = 16
 lr: 1.0e-5
 weight_decay: 0.01
 warmup_ratio: 0.06
@@ -16,8 +17,8 @@ dropout: 0.1
 seed: 42
 output_dir: checkpoints/deberta_v3_large
 use_focal_loss: false
-use_class_weights: true
+use_class_weights: false  # toggle true if minority classes collapse to 0 F1
 label_smoothing: 0.05
 alpha: 0.7
 consistency_beta: 0.1
-fp16: true
+fp16: false               # superseded by precision: bf16

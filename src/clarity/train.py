@@ -11,6 +11,7 @@ Supports:
     - Early stopping on dev macro F1
     - Class-weighted / focal loss
     - Gradient accumulation
+    - Mixed precision (bf16/fp16 on CUDA, fp32 on MPS/CPU)
     - Checkpoint saving
 """
 
@@ -33,14 +34,6 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
-# Disable SDPA/flash attention globally — shaky on MPS, can cause dtype mismatches
-try:
-    torch.backends.cuda.enable_flash_sdp(False)
-    torch.backends.cuda.enable_mem_efficient_sdp(False)
-    torch.backends.cuda.enable_math_sdp(True)
-except Exception:
-    pass  # older PyTorch versions may not have these
-
 from clarity.data import ClarityDataset, build_datasets, get_class_weights, load_dataframe
 from clarity.eval import evaluate_all
 from clarity.labels import (
@@ -62,6 +55,68 @@ from clarity.utils import (
 )
 
 logger = logging.getLogger("clarity")
+
+
+# ─── Precision / CUDA helpers ─────────────────────────────────────────────────
+
+
+def _resolve_precision(precision: str, device: torch.device) -> str:
+    """Resolve 'auto' precision and validate choice for the target device."""
+    if precision == "auto":
+        if device.type == "cuda":
+            if torch.cuda.is_bf16_supported():
+                return "bf16"
+            return "fp16"
+        return "fp32"  # MPS and CPU always fp32
+
+    # Validate device compatibility
+    if precision in ("bf16", "fp16") and device.type != "cuda":
+        logger.warning(
+            f"Mixed precision '{precision}' requires CUDA but device is '{device.type}'. "
+            f"Falling back to fp32."
+        )
+        return "fp32"
+
+    return precision
+
+
+def _setup_cuda_optimizations(precision: str) -> None:
+    """Enable CUDA-specific performance optimizations."""
+    # TF32 — free ~2x speedup on Ampere+ with negligible precision loss
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    logger.info("CUDA: TF32 enabled for matmul and cuDNN")
+
+    # SDPA / flash attention — enable on CUDA (disabled on MPS for stability)
+    try:
+        torch.backends.cuda.enable_flash_sdp(True)
+        torch.backends.cuda.enable_mem_efficient_sdp(True)
+        torch.backends.cuda.enable_math_sdp(True)
+        logger.info("CUDA: Flash/mem-efficient/math SDP all enabled")
+    except Exception:
+        logger.info("CUDA: SDP backend control not available (older PyTorch)")
+
+
+def _setup_mps_guards() -> None:
+    """Disable SDPA on MPS to prevent Metal kernel crashes."""
+    try:
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
+    except Exception:
+        pass
+
+
+def _get_autocast_dtype(precision: str) -> Optional[torch.dtype]:
+    """Map precision string to torch dtype for autocast."""
+    if precision == "bf16":
+        return torch.bfloat16
+    elif precision == "fp16":
+        return torch.float16
+    return None
+
+
+# ─── CLI ───────────────────────────────────────────────────────────────────────
 
 
 def parse_args() -> argparse.Namespace:
@@ -100,7 +155,13 @@ def parse_args() -> argparse.Namespace:
         help="Multitask consistency reg weight"
     )
     parser.add_argument("--num_workers", type=int, default=0)
-    parser.add_argument("--fp16", action="store_true", help="Use mixed precision")
+    # Legacy fp16 flag — mapped to precision=fp16
+    parser.add_argument("--fp16", action="store_true", help="(Legacy) Use fp16 mixed precision")
+    parser.add_argument(
+        "--precision", type=str, default="auto",
+        choices=["auto", "bf16", "fp16", "fp32"],
+        help="Mixed precision mode. 'auto' = bf16 on CUDA if supported, fp32 elsewhere."
+    )
     parser.add_argument(
         "--device", type=str, default=None,
         help="Force device: 'cpu', 'cuda', 'mps'. Auto-detected if not set."
@@ -108,6 +169,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--label_smoothing", type=float, default=0.0,
         help="Label smoothing factor (0.0 = off, 0.05-0.1 recommended)"
+    )
+    parser.add_argument(
+        "--debug_text", action="store_true",
+        help="Log first training example's constructed text for debugging"
     )
 
     args = parser.parse_args()
@@ -121,7 +186,14 @@ def parse_args() -> argparse.Namespace:
             else:
                 logger.warning(f"Unknown config key: {key}")
 
+    # Legacy fp16 flag → precision
+    if args.fp16 and args.precision == "auto":
+        args.precision = "fp16"
+
     return args
+
+
+# ─── Training loop ─────────────────────────────────────────────────────────────
 
 
 def train_epoch(
@@ -131,14 +203,18 @@ def train_epoch(
     scheduler: Any,
     device: torch.device,
     grad_accum: int = 1,
-    fp16: bool = False,
+    precision: str = "fp32",
     task: str = "evasion",
 ) -> Dict[str, float]:
     """Train for one epoch."""
     model.train()
     total_loss = 0.0
     num_batches = 0
-    scaler = torch.amp.GradScaler("cuda") if fp16 and device.type == "cuda" else None
+
+    autocast_dtype = _get_autocast_dtype(precision)
+    use_amp = autocast_dtype is not None and device.type == "cuda"
+    # GradScaler only for fp16 (bf16 doesn't need it)
+    scaler = torch.amp.GradScaler("cuda") if precision == "fp16" and device.type == "cuda" else None
 
     optimizer.zero_grad()
 
@@ -156,11 +232,14 @@ def train_epoch(
         if "clarity_label" in batch:
             kwargs["clarity_label"] = batch["clarity_label"].to(device)
 
-        if scaler:
-            with torch.amp.autocast("cuda"):
+        if use_amp:
+            with torch.amp.autocast("cuda", dtype=autocast_dtype):
                 outputs = model(**kwargs)
                 loss = outputs["loss"] / grad_accum
-            scaler.scale(loss).backward()
+            if scaler:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()  # bf16 doesn't need scaler
         else:
             outputs = model(**kwargs)
             loss = outputs["loss"] / grad_accum
@@ -322,13 +401,26 @@ def main():
                 )
     logger.info(f"Using device: {device}")
 
-    # FP16 only works on CUDA
-    if args.fp16 and device.type != "cuda":
-        logger.warning(
-            f"FP16 disabled: mixed precision is only supported on CUDA, "
-            f"but device is '{device.type}'. Training in FP32."
-        )
-        args.fp16 = False
+    # ── Precision & device-specific optimizations ──
+    precision = _resolve_precision(args.precision, device)
+
+    if device.type == "cuda":
+        _setup_cuda_optimizations(precision)
+        gpu_name = torch.cuda.get_device_name(0)
+        props = torch.cuda.get_device_properties(0)
+        vram = getattr(props, 'total_memory', getattr(props, 'total_mem', 0))
+        logger.info(f"GPU: {gpu_name} ({vram / 1e9:.1f} GB)")
+    elif device.type == "mps":
+        _setup_mps_guards()
+
+    # Attention implementation: SDPA on CUDA, eager on MPS/CPU
+    if device.type == "cuda":
+        attn_impl = "sdpa"
+    else:
+        attn_impl = "eager"
+
+    eff_batch = args.batch_size * args.grad_accum
+    logger.info(f"Precision: {precision} | Attention: {attn_impl} | Effective batch: {eff_batch}")
 
     # Tokenizer
     # DeBERTa-v3 needs use_fast=False to avoid spm.model conversion errors
@@ -348,6 +440,14 @@ def main():
     logger.info(f"Train: {len(train_ds)} examples")
     if dev_ds:
         logger.info(f"Dev: {len(dev_ds)} examples")
+
+    # Debug text — show first constructed example
+    if args.debug_text and len(train_ds) > 0:
+        sample = train_ds[0]
+        q = train_ds.questions[0]
+        a = train_ds.answers[0]
+        text = f"Q: {q} {tokenizer.sep_token} A: {a}"
+        logger.info(f"DEBUG TEXT (first example, {len(text)} chars): {text[:300]}")
 
     # Dataloaders
     train_loader = DataLoader(
@@ -394,19 +494,23 @@ def main():
         evasion_class_weights=ev_weights,
         clarity_class_weights=cl_weights,
         label_smoothing=getattr(args, "label_smoothing", 0.0),
+        attn_implementation=attn_impl,
     )
     model.to(device)
-    # Force ALL parameters to float32 — DeBERTa safetensors may load as fp16
-    model.float()
-    # Verify: no mixed dtypes should survive
-    param_dtypes = {p.dtype for p in model.parameters()}
-    logger.info(f"Model param dtypes after .float(): {param_dtypes}")
-    if param_dtypes != {torch.float32}:
-        logger.warning(
-            f"Mixed dtypes detected: {param_dtypes}. Forcing all to float32."
-        )
-        for p in model.parameters():
-            p.data = p.data.float()
+
+    # Float32 hardening — only needed on MPS/CPU to fix DeBERTa safetensor fp16 loads
+    # On CUDA with mixed precision, we want the model in fp32 and autocast handles the rest
+    if device.type != "cuda" or precision == "fp32":
+        model.float()
+        param_dtypes = {p.dtype for p in model.parameters()}
+        logger.info(f"Model param dtypes after .float(): {param_dtypes}")
+        if param_dtypes != {torch.float32}:
+            logger.warning(f"Mixed dtypes detected: {param_dtypes}. Forcing all to float32.")
+            for p in model.parameters():
+                p.data = p.data.float()
+    else:
+        param_dtypes = {p.dtype for p in model.parameters()}
+        logger.info(f"Model param dtypes (CUDA, precision={precision}): {param_dtypes}")
 
     param_info = count_parameters(model)
     logger.info(f"Parameters: {param_info}")
@@ -457,7 +561,7 @@ def main():
         train_metrics = train_epoch(
             model, train_loader, optimizer, scheduler, device,
             grad_accum=args.grad_accum,
-            fp16=args.fp16,
+            precision=precision,
             task=args.task,
         )
         elapsed = time.time() - t0

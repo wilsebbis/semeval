@@ -101,6 +101,7 @@ def load_model_from_checkpoint(
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     args = ckpt["args"]
 
+    attn_impl = "sdpa" if device.type == "cuda" else "eager"
     model = build_model(
         model_name=args.get("model_name", "roberta-base"),
         task=args.get("task", "evasion"),
@@ -110,6 +111,7 @@ def load_model_from_checkpoint(
         alpha=args.get("alpha", 0.7),
         consistency_beta=args.get("consistency_beta", 0.1),
         label_smoothing=args.get("label_smoothing", 0.0),
+        attn_implementation=attn_impl,
     )
 
     model.load_state_dict(ckpt["model_state_dict"])

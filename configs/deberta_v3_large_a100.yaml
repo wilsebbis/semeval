@@ -1,0 +1,24 @@
+# CLARITY Training Config: DeBERTa-v3-large — A100 dedicated
+# Identical to deberta_v3_large.yaml but named for clarity in docs
+# Use this on Colab A100. Expected: Task2 strict F1 ~0.56-0.65
+
+model_name: microsoft/deberta-v3-large
+task: evasion
+max_length: 384
+precision: bf16
+batch_size: 8
+grad_accum: 2             # effective batch = 16
+lr: 1.0e-5
+weight_decay: 0.01
+warmup_ratio: 0.06
+epochs: 5
+patience: 3
+dropout: 0.1
+seed: 42
+output_dir: checkpoints/deberta_v3_large_a100
+use_focal_loss: false
+use_class_weights: false  # toggle true if minority classes collapse
+label_smoothing: 0.05
+alpha: 0.7
+consistency_beta: 0.1
+fp16: false
